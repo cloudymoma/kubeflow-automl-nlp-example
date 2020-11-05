@@ -1,0 +1,1101 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: automl-nlp-
+  annotations: {pipelines.kubeflow.org/kfp_sdk_version: 1.0.0, pipelines.kubeflow.org/pipeline_compilation_time: '2020-08-25T01:16:10.187365',
+    pipelines.kubeflow.org/pipeline_spec: '{"description": "Demonstrate an AutoML
+      NLP workflow", "inputs": [{"default": "", "name": "gcp_project_id", "optional":
+      true, "type": "String"}, {"default": "us-central1", "name": "gcp_region", "optional":
+      true, "type": "String"}, {"default": "", "name": "dataset_display_name", "optional":
+      true, "type": "String"}, {"default": "", "name": "api_endpoint", "optional":
+      true, "type": "String"}, {"default": "", "name": "gcs_path", "optional": true,
+      "type": "String"}, {"default": "nlpmodel", "name": "model_prefix", "optional":
+      true, "type": "String"}], "name": "AutoML NLP"}'}
+  labels: {pipelines.kubeflow.org/kfp_sdk_version: 1.0.0}
+spec:
+  entrypoint: automl-nlp
+  templates:
+  - name: automl-create-dataset-for-nlp
+    container:
+      args: [--gcp-project-id, '{{inputs.parameters.gcp_project_id}}', --gcp-region,
+        '{{inputs.parameters.gcp_region}}', --dataset-display-name, '{{inputs.parameters.dataset_display_name}}',
+        --api-endpoint, '{{inputs.parameters.api_endpoint}}', '----output-paths',
+        /tmp/outputs/dataset_path/data, /tmp/outputs/dataset_status/data, /tmp/outputs/dataset_id/data]
+      command:
+      - python3
+      - -u
+      - -c
+      - |
+        def automl_create_dataset_for_nlp(
+          gcp_project_id,
+          gcp_region,
+          dataset_display_name,
+          api_endpoint = None,
+        ):
+
+          import sys
+          import subprocess
+          subprocess.run([sys.executable, '-m', 'pip', 'install', 'googleapis-common-protos==1.6.0',
+              '--no-warn-script-location'],
+              env={'PIP_DISABLE_PIP_VERSION_CHECK': '1'}, check=True)
+          subprocess.run([sys.executable, '-m', 'pip', 'install', 'google-cloud-automl==0.9.0',
+              '--quiet', '--no-warn-script-location'],
+              env={'PIP_DISABLE_PIP_VERSION_CHECK': '1'}, check=True)
+
+          import google
+          import logging
+          from google.api_core.client_options import ClientOptions
+          from google.cloud import automl
+
+          logging.getLogger().setLevel(logging.INFO)  # TODO: make level configurable
+
+          if api_endpoint:
+            client_options = ClientOptions(api_endpoint=api_endpoint)
+            client = automl.AutoMlClient(client_options=client_options)
+          else:
+            client = automl.AutoMlClient()
+
+          status = 'created'
+          project_location = client.location_path(gcp_project_id, gcp_region)
+          # Check if dataset is existed.
+          for element in client.list_datasets(project_location):
+            if element.display_name == dataset_display_name:
+              status = 'created but existed'
+              if element.example_count == 0:
+                status = 'existed but empty'
+                return (element.name, status, element.name.rsplit('/', 1)[-1])
+          try:
+            metadata = automl.types.TextClassificationDatasetMetadata(classification_type=automl.enums.ClassificationType.MULTICLASS)
+            dataset = automl.types.Dataset(display_name=dataset_display_name, text_classification_dataset_metadata=metadata,)
+            # Create a dataset with the given display name
+            response = client.create_dataset(project_location, dataset)
+            created_dataset = response.result()
+            # Log info about the created dataset
+            logging.info("Dataset name: {}".format(created_dataset.name))
+            logging.info("Dataset id: {}".format(created_dataset.name.split("/")[-1]))
+            logging.info("Dataset display name: {}".format(dataset.display_name))
+            logging.info("Dataset example count: {}".format(dataset.example_count))
+            logging.info("Dataset create time:")
+            logging.info("\tseconds: {}".format(dataset.create_time.seconds))
+            logging.info("\tnanos: {}".format(dataset.create_time.nanos))
+
+            dataset_id = created_dataset.name.rsplit('/', 1)[-1]
+            return (created_dataset.name, status, dataset_id)
+          except google.api_core.exceptions.GoogleAPICallError as e:
+            logging.warning(e)
+            raise e
+
+        def _serialize_str(str_value: str) -> str:
+            if not isinstance(str_value, str):
+                raise TypeError('Value "{}" has type "{}" instead of str.'.format(str(str_value), str(type(str_value))))
+            return str_value
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Automl create dataset for nlp', description='')
+        _parser.add_argument("--gcp-project-id", dest="gcp_project_id", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--gcp-region", dest="gcp_region", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--dataset-display-name", dest="dataset_display_name", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--api-endpoint", dest="api_endpoint", type=str, required=False, default=argparse.SUPPRESS)
+        _parser.add_argument("----output-paths", dest="_output_paths", type=str, nargs=3)
+        _parsed_args = vars(_parser.parse_args())
+        _output_files = _parsed_args.pop("_output_paths", [])
+
+        _outputs = automl_create_dataset_for_nlp(**_parsed_args)
+
+        _output_serializers = [
+            _serialize_str,
+            _serialize_str,
+            _serialize_str,
+
+        ]
+
+        import os
+        for idx, output_file in enumerate(_output_files):
+            try:
+                os.makedirs(os.path.dirname(output_file))
+            except OSError:
+                pass
+            with open(output_file, 'w') as f:
+                f.write(_output_serializers[idx](_outputs[idx]))
+      image: python:3.7
+    inputs:
+      parameters:
+      - {name: api_endpoint}
+      - {name: dataset_display_name}
+      - {name: gcp_project_id}
+      - {name: gcp_region}
+    outputs:
+      parameters:
+      - name: automl-create-dataset-for-nlp-dataset_id
+        valueFrom: {path: /tmp/outputs/dataset_id/data}
+      artifacts:
+      - {name: automl-create-dataset-for-nlp-dataset_id, path: /tmp/outputs/dataset_id/data}
+      - {name: automl-create-dataset-for-nlp-dataset_path, path: /tmp/outputs/dataset_path/data}
+      - {name: automl-create-dataset-for-nlp-dataset_status, path: /tmp/outputs/dataset_status/data}
+    metadata:
+      annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
+          {"args": ["--gcp-project-id", {"inputValue": "gcp_project_id"}, "--gcp-region",
+          {"inputValue": "gcp_region"}, "--dataset-display-name", {"inputValue": "dataset_display_name"},
+          {"if": {"cond": {"isPresent": "api_endpoint"}, "then": ["--api-endpoint",
+          {"inputValue": "api_endpoint"}]}}, "----output-paths", {"outputPath": "dataset_path"},
+          {"outputPath": "dataset_status"}, {"outputPath": "dataset_id"}], "command":
+          ["python3", "-u", "-c", "def automl_create_dataset_for_nlp(\n  gcp_project_id,\n  gcp_region,\n  dataset_display_name,\n  api_endpoint
+          = None,\n):\n\n  import sys\n  import subprocess\n  subprocess.run([sys.executable,
+          ''-m'', ''pip'', ''install'', ''googleapis-common-protos==1.6.0'',\n      ''--no-warn-script-location''],\n      env={''PIP_DISABLE_PIP_VERSION_CHECK'':
+          ''1''}, check=True)\n  subprocess.run([sys.executable, ''-m'', ''pip'',
+          ''install'', ''google-cloud-automl==0.9.0'',\n      ''--quiet'', ''--no-warn-script-location''],\n      env={''PIP_DISABLE_PIP_VERSION_CHECK'':
+          ''1''}, check=True)\n\n  import google\n  import logging\n  from google.api_core.client_options
+          import ClientOptions\n  from google.cloud import automl\n\n  logging.getLogger().setLevel(logging.INFO)  #
+          TODO: make level configurable\n\n  if api_endpoint:\n    client_options
+          = ClientOptions(api_endpoint=api_endpoint)\n    client = automl.AutoMlClient(client_options=client_options)\n  else:\n    client
+          = automl.AutoMlClient()\n\n  status = ''created''\n  project_location =
+          client.location_path(gcp_project_id, gcp_region)\n  # Check if dataset is
+          existed.\n  for element in client.list_datasets(project_location):\n    if
+          element.display_name == dataset_display_name:\n      status = ''created
+          but existed''\n      if element.example_count == 0:\n        status = ''existed
+          but empty''\n        return (element.name, status, element.name.rsplit(''/'',
+          1)[-1])\n  try:\n    metadata = automl.types.TextClassificationDatasetMetadata(classification_type=automl.enums.ClassificationType.MULTICLASS)\n    dataset
+          = automl.types.Dataset(display_name=dataset_display_name, text_classification_dataset_metadata=metadata,)\n    #
+          Create a dataset with the given display name\n    response = client.create_dataset(project_location,
+          dataset)\n    created_dataset = response.result()\n    # Log info about
+          the created dataset\n    logging.info(\"Dataset name: {}\".format(created_dataset.name))\n    logging.info(\"Dataset
+          id: {}\".format(created_dataset.name.split(\"/\")[-1]))\n    logging.info(\"Dataset
+          display name: {}\".format(dataset.display_name))\n    logging.info(\"Dataset
+          example count: {}\".format(dataset.example_count))\n    logging.info(\"Dataset
+          create time:\")\n    logging.info(\"\\tseconds: {}\".format(dataset.create_time.seconds))\n    logging.info(\"\\tnanos:
+          {}\".format(dataset.create_time.nanos))\n\n    dataset_id = created_dataset.name.rsplit(''/'',
+          1)[-1]\n    return (created_dataset.name, status, dataset_id)\n  except
+          google.api_core.exceptions.GoogleAPICallError as e:\n    logging.warning(e)\n    raise
+          e\n\ndef _serialize_str(str_value: str) -> str:\n    if not isinstance(str_value,
+          str):\n        raise TypeError(''Value \"{}\" has type \"{}\" instead of
+          str.''.format(str(str_value), str(type(str_value))))\n    return str_value\n\nimport
+          argparse\n_parser = argparse.ArgumentParser(prog=''Automl create dataset
+          for nlp'', description='''')\n_parser.add_argument(\"--gcp-project-id\",
+          dest=\"gcp_project_id\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--gcp-region\",
+          dest=\"gcp_region\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--dataset-display-name\",
+          dest=\"dataset_display_name\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--api-endpoint\",
+          dest=\"api_endpoint\", type=str, required=False, default=argparse.SUPPRESS)\n_parser.add_argument(\"----output-paths\",
+          dest=\"_output_paths\", type=str, nargs=3)\n_parsed_args = vars(_parser.parse_args())\n_output_files
+          = _parsed_args.pop(\"_output_paths\", [])\n\n_outputs = automl_create_dataset_for_nlp(**_parsed_args)\n\n_output_serializers
+          = [\n    _serialize_str,\n    _serialize_str,\n    _serialize_str,\n\n]\n\nimport
+          os\nfor idx, output_file in enumerate(_output_files):\n    try:\n        os.makedirs(os.path.dirname(output_file))\n    except
+          OSError:\n        pass\n    with open(output_file, ''w'') as f:\n        f.write(_output_serializers[idx](_outputs[idx]))\n"],
+          "image": "python:3.7"}}, "inputs": [{"name": "gcp_project_id", "type": "String"},
+          {"name": "gcp_region", "type": "String"}, {"name": "dataset_display_name",
+          "type": "String"}, {"name": "api_endpoint", "optional": true, "type": "String"}],
+          "name": "Automl create dataset for nlp", "outputs": [{"name": "dataset_path",
+          "type": "String"}, {"name": "dataset_status", "type": "String"}, {"name":
+          "dataset_id", "type": "String"}]}', pipelines.kubeflow.org/component_ref: '{"digest":
+          "12cc2205764a1efcf9f98a53da46d66ab0f6f7edcfdc162c4702150bedc71278", "url":
+          "./create_dataset/dataset_component.yaml"}'}
+  - name: automl-create-model-for-nlp
+    container:
+      args: [--gcp-project-id, '{{inputs.parameters.gcp_project_id}}', --gcp-region,
+        '{{inputs.parameters.gcp_region}}', --dataset-id, '{{inputs.parameters.automl-import-data-for-nlp-dataset_id}}',
+        --api-endpoint, '{{inputs.parameters.api_endpoint}}', --model-prefix, '{{inputs.parameters.model_prefix}}',
+        '----output-paths', /tmp/outputs/model_display_name/data, /tmp/outputs/model_name/data,
+        /tmp/outputs/model_id/data]
+      command:
+      - python3
+      - -u
+      - -c
+      - |
+        def automl_create_model_for_nlp(
+          gcp_project_id,
+          gcp_region,
+          dataset_id,
+          api_endpoint = None,
+          model_display_name = None,
+          model_prefix = 'catmodel',
+        ):
+
+          import subprocess
+          import sys
+          # we could build a base image that includes these libraries if we don't want to do
+          # the dynamic installation when the step runs.
+          subprocess.run([sys.executable, '-m', 'pip', 'install', 'googleapis-common-protos==1.6.0', '--no-warn-script-location'],
+              env={'PIP_DISABLE_PIP_VERSION_CHECK': '1'}, check=True)
+          subprocess.run([sys.executable, '-m', 'pip', 'install', 'google-cloud-automl==0.9.0', '--quiet', '--no-warn-script-location'],
+              env={'PIP_DISABLE_PIP_VERSION_CHECK': '1'}, check=True)
+
+          import google
+          import logging
+          from google.api_core.client_options import ClientOptions
+          from google.cloud import automl
+          import time
+
+          logging.getLogger().setLevel(logging.INFO)  # TODO: make level configurable
+          # TODO: we could instead check for region 'eu' and use 'eu-automl.googleapis.com:443'endpoint
+          # in that case, instead of requiring endpoint to be specified.
+          if api_endpoint:
+            client_options = ClientOptions(api_endpoint=api_endpoint)
+            client = automl.AutoMlClient(client_options=client_options)
+          else:
+            client = automl.AutoMlClient()
+
+          # A resource that represents Google Cloud Platform location.
+          project_location = client.location_path(gcp_project_id, gcp_region)
+
+          metadata = automl.types.TextClassificationModelMetadata()
+          if not model_display_name:
+            model_display_name = '{}_{}'.format(model_prefix, str(int(time.time())))
+          model = automl.types.Model(
+            display_name=model_display_name,
+            dataset_id=dataset_id,
+            text_classification_model_metadata=metadata,
+          )
+          # Create a model with the model metadata in the region.
+          logging.info('Training model {}...'.format(model_display_name))
+          response = client.create_model(project_location, model)
+
+          logging.info("Training operation: {}".format(response.operation))
+          logging.info("Training operation name: {}".format(response.operation.name))
+          logging.info("Training in progress. This operation may take multiple hours to complete.")
+
+          # block termination of the op until training is finished.
+          result = response.result()
+          logging.info("Training completed: {}".format(result))
+          model_name = result.name
+          model_id = model_name.rsplit('/', 1)[-1]
+          print('model name: {}, model id: {}'.format(model_name, model_id))
+          return (model_display_name, model_name, model_id)
+
+        def _serialize_str(str_value: str) -> str:
+            if not isinstance(str_value, str):
+                raise TypeError('Value "{}" has type "{}" instead of str.'.format(str(str_value), str(type(str_value))))
+            return str_value
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Automl create model for nlp', description='')
+        _parser.add_argument("--gcp-project-id", dest="gcp_project_id", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--gcp-region", dest="gcp_region", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--dataset-id", dest="dataset_id", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--api-endpoint", dest="api_endpoint", type=str, required=False, default=argparse.SUPPRESS)
+        _parser.add_argument("--model-display-name", dest="model_display_name", type=str, required=False, default=argparse.SUPPRESS)
+        _parser.add_argument("--model-prefix", dest="model_prefix", type=str, required=False, default=argparse.SUPPRESS)
+        _parser.add_argument("----output-paths", dest="_output_paths", type=str, nargs=3)
+        _parsed_args = vars(_parser.parse_args())
+        _output_files = _parsed_args.pop("_output_paths", [])
+
+        _outputs = automl_create_model_for_nlp(**_parsed_args)
+
+        _output_serializers = [
+            _serialize_str,
+            _serialize_str,
+            _serialize_str,
+
+        ]
+
+        import os
+        for idx, output_file in enumerate(_output_files):
+            try:
+                os.makedirs(os.path.dirname(output_file))
+            except OSError:
+                pass
+            with open(output_file, 'w') as f:
+                f.write(_output_serializers[idx](_outputs[idx]))
+      image: python:3.7
+    inputs:
+      parameters:
+      - {name: api_endpoint}
+      - {name: automl-import-data-for-nlp-dataset_id}
+      - {name: gcp_project_id}
+      - {name: gcp_region}
+      - {name: model_prefix}
+    outputs:
+      parameters:
+      - name: automl-create-model-for-nlp-model_display_name
+        valueFrom: {path: /tmp/outputs/model_display_name/data}
+      - name: automl-create-model-for-nlp-model_id
+        valueFrom: {path: /tmp/outputs/model_id/data}
+      - name: automl-create-model-for-nlp-model_name
+        valueFrom: {path: /tmp/outputs/model_name/data}
+      artifacts:
+      - {name: automl-create-model-for-nlp-model_display_name, path: /tmp/outputs/model_display_name/data}
+      - {name: automl-create-model-for-nlp-model_id, path: /tmp/outputs/model_id/data}
+      - {name: automl-create-model-for-nlp-model_name, path: /tmp/outputs/model_name/data}
+    metadata:
+      annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
+          {"args": ["--gcp-project-id", {"inputValue": "gcp_project_id"}, "--gcp-region",
+          {"inputValue": "gcp_region"}, "--dataset-id", {"inputValue": "dataset_id"},
+          {"if": {"cond": {"isPresent": "api_endpoint"}, "then": ["--api-endpoint",
+          {"inputValue": "api_endpoint"}]}}, {"if": {"cond": {"isPresent": "model_display_name"},
+          "then": ["--model-display-name", {"inputValue": "model_display_name"}]}},
+          {"if": {"cond": {"isPresent": "model_prefix"}, "then": ["--model-prefix",
+          {"inputValue": "model_prefix"}]}}, "----output-paths", {"outputPath": "model_display_name"},
+          {"outputPath": "model_name"}, {"outputPath": "model_id"}], "command": ["python3",
+          "-u", "-c", "def automl_create_model_for_nlp(\n  gcp_project_id,\n  gcp_region,\n  dataset_id,\n  api_endpoint
+          = None,\n  model_display_name = None,\n  model_prefix = ''catmodel'',\n):\n\n  import
+          subprocess\n  import sys\n  # we could build a base image that includes
+          these libraries if we don''t want to do\n  # the dynamic installation when
+          the step runs.\n  subprocess.run([sys.executable, ''-m'', ''pip'', ''install'',
+          ''googleapis-common-protos==1.6.0'', ''--no-warn-script-location''],\n      env={''PIP_DISABLE_PIP_VERSION_CHECK'':
+          ''1''}, check=True)\n  subprocess.run([sys.executable, ''-m'', ''pip'',
+          ''install'', ''google-cloud-automl==0.9.0'', ''--quiet'', ''--no-warn-script-location''],\n      env={''PIP_DISABLE_PIP_VERSION_CHECK'':
+          ''1''}, check=True)\n\n  import google\n  import logging\n  from google.api_core.client_options
+          import ClientOptions\n  from google.cloud import automl\n  import time\n\n  logging.getLogger().setLevel(logging.INFO)  #
+          TODO: make level configurable\n  # TODO: we could instead check for region
+          ''eu'' and use ''eu-automl.googleapis.com:443''endpoint\n  # in that case,
+          instead of requiring endpoint to be specified.\n  if api_endpoint:\n    client_options
+          = ClientOptions(api_endpoint=api_endpoint)\n    client = automl.AutoMlClient(client_options=client_options)\n  else:\n    client
+          = automl.AutoMlClient()\n\n  # A resource that represents Google Cloud Platform
+          location.\n  project_location = client.location_path(gcp_project_id, gcp_region)\n\n  metadata
+          = automl.types.TextClassificationModelMetadata()\n  if not model_display_name:\n    model_display_name
+          = ''{}_{}''.format(model_prefix, str(int(time.time())))\n  model = automl.types.Model(\n    display_name=model_display_name,\n    dataset_id=dataset_id,\n    text_classification_model_metadata=metadata,\n  )\n  #
+          Create a model with the model metadata in the region.\n  logging.info(''Training
+          model {}...''.format(model_display_name))\n  response = client.create_model(project_location,
+          model)\n\n  logging.info(\"Training operation: {}\".format(response.operation))\n  logging.info(\"Training
+          operation name: {}\".format(response.operation.name))\n  logging.info(\"Training
+          in progress. This operation may take multiple hours to complete.\")\n\n  #
+          block termination of the op until training is finished.\n  result = response.result()\n  logging.info(\"Training
+          completed: {}\".format(result))\n  model_name = result.name\n  model_id
+          = model_name.rsplit(''/'', 1)[-1]\n  print(''model name: {}, model id: {}''.format(model_name,
+          model_id))\n  return (model_display_name, model_name, model_id)\n\ndef _serialize_str(str_value:
+          str) -> str:\n    if not isinstance(str_value, str):\n        raise TypeError(''Value
+          \"{}\" has type \"{}\" instead of str.''.format(str(str_value), str(type(str_value))))\n    return
+          str_value\n\nimport argparse\n_parser = argparse.ArgumentParser(prog=''Automl
+          create model for nlp'', description='''')\n_parser.add_argument(\"--gcp-project-id\",
+          dest=\"gcp_project_id\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--gcp-region\",
+          dest=\"gcp_region\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--dataset-id\",
+          dest=\"dataset_id\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--api-endpoint\",
+          dest=\"api_endpoint\", type=str, required=False, default=argparse.SUPPRESS)\n_parser.add_argument(\"--model-display-name\",
+          dest=\"model_display_name\", type=str, required=False, default=argparse.SUPPRESS)\n_parser.add_argument(\"--model-prefix\",
+          dest=\"model_prefix\", type=str, required=False, default=argparse.SUPPRESS)\n_parser.add_argument(\"----output-paths\",
+          dest=\"_output_paths\", type=str, nargs=3)\n_parsed_args = vars(_parser.parse_args())\n_output_files
+          = _parsed_args.pop(\"_output_paths\", [])\n\n_outputs = automl_create_model_for_nlp(**_parsed_args)\n\n_output_serializers
+          = [\n    _serialize_str,\n    _serialize_str,\n    _serialize_str,\n\n]\n\nimport
+          os\nfor idx, output_file in enumerate(_output_files):\n    try:\n        os.makedirs(os.path.dirname(output_file))\n    except
+          OSError:\n        pass\n    with open(output_file, ''w'') as f:\n        f.write(_output_serializers[idx](_outputs[idx]))\n"],
+          "image": "python:3.7"}}, "inputs": [{"name": "gcp_project_id", "type": "String"},
+          {"name": "gcp_region", "type": "String"}, {"name": "dataset_id", "type":
+          "String"}, {"name": "api_endpoint", "optional": true, "type": "String"},
+          {"name": "model_display_name", "optional": true, "type": "String"}, {"default":
+          "catmodel", "name": "model_prefix", "optional": true, "type": "String"}],
+          "name": "Automl create model for nlp", "outputs": [{"name": "model_display_name",
+          "type": "String"}, {"name": "model_name", "type": "String"}, {"name": "model_id",
+          "type": "String"}]}', pipelines.kubeflow.org/component_ref: '{"digest":
+          "4ca2d630b091d0e411cf67b118fdcae48b7056b372b14e66ed10fe1b33e9b864", "url":
+          "./create_model/model_component.yaml"}'}
+  - name: automl-deploy-nlp-model
+    container:
+      args: [--gcp-project-id, '{{inputs.parameters.gcp_project_id}}', --gcp-region,
+        '{{inputs.parameters.gcp_region}}', --model-display-name, '{{inputs.parameters.automl-create-model-for-nlp-model_display_name}}',
+        --model-id, '{{inputs.parameters.automl-create-model-for-nlp-model_id}}',
+        --api-endpoint, '{{inputs.parameters.api_endpoint}}', '----output-paths',
+        /tmp/outputs/model_display_name/data, /tmp/outputs/model_id/data, /tmp/outputs/status/data]
+      command:
+      - python3
+      - -u
+      - -c
+      - |
+        def automl_deploy_nlp_model(
+          gcp_project_id,
+          gcp_region,
+          model_display_name,
+          model_id,
+          api_endpoint = None,
+        ):
+          import subprocess
+          import sys
+          subprocess.run([sys.executable, '-m', 'pip', 'install', 'googleapis-common-protos==1.6.0', '--no-warn-script-location'],
+              env={'PIP_DISABLE_PIP_VERSION_CHECK': '1'}, check=True)
+          subprocess.run([sys.executable, '-m', 'pip', 'install', 'google-cloud-automl==0.9.0', '--quiet', '--no-warn-script-location'],
+              env={'PIP_DISABLE_PIP_VERSION_CHECK': '1'}, check=True)
+
+          import google
+          import logging
+          from google.api_core.client_options import ClientOptions
+          from google.api_core import exceptions
+          from google.cloud import  automl
+          from google.cloud.automl import enums
+
+          logging.getLogger().setLevel(logging.INFO)  # TODO: make level configurable
+
+          if api_endpoint:
+            client_options = ClientOptions(api_endpoint=api_endpoint)
+            client = automl.AutoMlClient(client_options=client_options)
+          else:
+            client = automl.AutoMlClient()
+
+          try:
+              logging.info('Deploying model {}'.format(model_display_name))
+              model_full_id = client.model_path(gcp_project_id, gcp_region, model_id)
+              response = client.deploy_model(model_full_id)
+              # synchronous wait
+              logging.info("Model deployed. {}".format(response.result()))
+              status = 'deployed'
+          except exceptions.NotFound as e:
+            logging.warning(e)
+            status = 'not_found'
+          except Exception as e:
+            logging.warning(e)
+            status = 'undeployed'
+
+          logging.info('Model status: {}'.format(status))
+          return (model_display_name, model_id, status)
+
+        def _serialize_str(str_value: str) -> str:
+            if not isinstance(str_value, str):
+                raise TypeError('Value "{}" has type "{}" instead of str.'.format(str(str_value), str(type(str_value))))
+            return str_value
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Automl deploy nlp model', description='')
+        _parser.add_argument("--gcp-project-id", dest="gcp_project_id", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--gcp-region", dest="gcp_region", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--model-display-name", dest="model_display_name", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--model-id", dest="model_id", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--api-endpoint", dest="api_endpoint", type=str, required=False, default=argparse.SUPPRESS)
+        _parser.add_argument("----output-paths", dest="_output_paths", type=str, nargs=3)
+        _parsed_args = vars(_parser.parse_args())
+        _output_files = _parsed_args.pop("_output_paths", [])
+
+        _outputs = automl_deploy_nlp_model(**_parsed_args)
+
+        _output_serializers = [
+            _serialize_str,
+            _serialize_str,
+            _serialize_str,
+
+        ]
+
+        import os
+        for idx, output_file in enumerate(_output_files):
+            try:
+                os.makedirs(os.path.dirname(output_file))
+            except OSError:
+                pass
+            with open(output_file, 'w') as f:
+                f.write(_output_serializers[idx](_outputs[idx]))
+      image: python:3.7
+    inputs:
+      parameters:
+      - {name: api_endpoint}
+      - {name: automl-create-model-for-nlp-model_display_name}
+      - {name: automl-create-model-for-nlp-model_id}
+      - {name: gcp_project_id}
+      - {name: gcp_region}
+    outputs:
+      parameters:
+      - name: automl-deploy-nlp-model-model_id
+        valueFrom: {path: /tmp/outputs/model_id/data}
+      artifacts:
+      - {name: automl-deploy-nlp-model-model_display_name, path: /tmp/outputs/model_display_name/data}
+      - {name: automl-deploy-nlp-model-model_id, path: /tmp/outputs/model_id/data}
+      - {name: automl-deploy-nlp-model-status, path: /tmp/outputs/status/data}
+    metadata:
+      annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
+          {"args": ["--gcp-project-id", {"inputValue": "gcp_project_id"}, "--gcp-region",
+          {"inputValue": "gcp_region"}, "--model-display-name", {"inputValue": "model_display_name"},
+          "--model-id", {"inputValue": "model_id"}, {"if": {"cond": {"isPresent":
+          "api_endpoint"}, "then": ["--api-endpoint", {"inputValue": "api_endpoint"}]}},
+          "----output-paths", {"outputPath": "model_display_name"}, {"outputPath":
+          "model_id"}, {"outputPath": "status"}], "command": ["python3", "-u", "-c",
+          "def automl_deploy_nlp_model(\n  gcp_project_id,\n  gcp_region,\n  model_display_name,\n  model_id,\n  api_endpoint
+          = None,\n):\n  import subprocess\n  import sys\n  subprocess.run([sys.executable,
+          ''-m'', ''pip'', ''install'', ''googleapis-common-protos==1.6.0'', ''--no-warn-script-location''],\n      env={''PIP_DISABLE_PIP_VERSION_CHECK'':
+          ''1''}, check=True)\n  subprocess.run([sys.executable, ''-m'', ''pip'',
+          ''install'', ''google-cloud-automl==0.9.0'', ''--quiet'', ''--no-warn-script-location''],\n      env={''PIP_DISABLE_PIP_VERSION_CHECK'':
+          ''1''}, check=True)\n\n  import google\n  import logging\n  from google.api_core.client_options
+          import ClientOptions\n  from google.api_core import exceptions\n  from google.cloud
+          import  automl\n  from google.cloud.automl import enums\n\n  logging.getLogger().setLevel(logging.INFO)  #
+          TODO: make level configurable\n\n  if api_endpoint:\n    client_options
+          = ClientOptions(api_endpoint=api_endpoint)\n    client = automl.AutoMlClient(client_options=client_options)\n  else:\n    client
+          = automl.AutoMlClient()\n\n  try:\n      logging.info(''Deploying model
+          {}''.format(model_display_name))\n      model_full_id = client.model_path(gcp_project_id,
+          gcp_region, model_id)\n      response = client.deploy_model(model_full_id)\n      #
+          synchronous wait\n      logging.info(\"Model deployed. {}\".format(response.result()))\n      status
+          = ''deployed''\n  except exceptions.NotFound as e:\n    logging.warning(e)\n    status
+          = ''not_found''\n  except Exception as e:\n    logging.warning(e)\n    status
+          = ''undeployed''\n\n  logging.info(''Model status: {}''.format(status))\n  return
+          (model_display_name, model_id, status)\n\ndef _serialize_str(str_value:
+          str) -> str:\n    if not isinstance(str_value, str):\n        raise TypeError(''Value
+          \"{}\" has type \"{}\" instead of str.''.format(str(str_value), str(type(str_value))))\n    return
+          str_value\n\nimport argparse\n_parser = argparse.ArgumentParser(prog=''Automl
+          deploy nlp model'', description='''')\n_parser.add_argument(\"--gcp-project-id\",
+          dest=\"gcp_project_id\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--gcp-region\",
+          dest=\"gcp_region\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--model-display-name\",
+          dest=\"model_display_name\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--model-id\",
+          dest=\"model_id\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--api-endpoint\",
+          dest=\"api_endpoint\", type=str, required=False, default=argparse.SUPPRESS)\n_parser.add_argument(\"----output-paths\",
+          dest=\"_output_paths\", type=str, nargs=3)\n_parsed_args = vars(_parser.parse_args())\n_output_files
+          = _parsed_args.pop(\"_output_paths\", [])\n\n_outputs = automl_deploy_nlp_model(**_parsed_args)\n\n_output_serializers
+          = [\n    _serialize_str,\n    _serialize_str,\n    _serialize_str,\n\n]\n\nimport
+          os\nfor idx, output_file in enumerate(_output_files):\n    try:\n        os.makedirs(os.path.dirname(output_file))\n    except
+          OSError:\n        pass\n    with open(output_file, ''w'') as f:\n        f.write(_output_serializers[idx](_outputs[idx]))\n"],
+          "image": "python:3.7"}}, "inputs": [{"name": "gcp_project_id", "type": "String"},
+          {"name": "gcp_region", "type": "String"}, {"name": "model_display_name",
+          "type": "String"}, {"name": "model_id"}, {"name": "api_endpoint", "optional":
+          true, "type": "String"}], "name": "Automl deploy nlp model", "outputs":
+          [{"name": "model_display_name", "type": "String"}, {"name": "model_id",
+          "type": "String"}, {"name": "status", "type": "String"}]}', pipelines.kubeflow.org/component_ref: '{"digest":
+          "19f95c1bf57c6d91df890defc838463d991a39dbb31fde559a0be0013eb43f90", "url":
+          "./deploy_model/deploy_component.yaml"}'}
+  - name: automl-evaluate-model-for-nlp
+    container:
+      args: [--gcp-project-id, '{{inputs.parameters.gcp_project_id}}', --gcp-region,
+        '{{inputs.parameters.gcp_region}}', --api-endpoint, '{{inputs.parameters.api_endpoint}}',
+        --model-name, '{{inputs.parameters.automl-create-model-for-nlp-model_name}}',
+        --mlpipeline-metrics, /tmp/outputs/mlpipeline_metrics/data, '----output-paths',
+        /tmp/outputs/auprc/data, /tmp/outputs/f1/data, /tmp/outputs/recall/data, /tmp/outputs/precision/data]
+      command:
+      - python3
+      - -u
+      - -c
+      - |
+        def _make_parent_dirs_and_return_path(file_path: str):
+            import os
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            return file_path
+
+        def automl_evaluate_model_for_nlp(
+          mlpipeline_metrics_path,
+          gcp_project_id,
+          gcp_region,
+          api_endpoint = None,
+          model_name = None,
+        ):
+
+          import subprocess
+          import sys
+          # we could build a base image that includes these libraries if we don't want to do
+          # the dynamic installation when the step runs.
+          subprocess.run([sys.executable, '-m', 'pip', 'install', 'googleapis-common-protos==1.6.0', '--no-warn-script-location'],
+              env={'PIP_DISABLE_PIP_VERSION_CHECK': '1'}, check=True)
+          subprocess.run([sys.executable, '-m', 'pip', 'install', 'google-cloud-automl==0.9.0', '--quiet', '--no-warn-script-location'],
+              env={'PIP_DISABLE_PIP_VERSION_CHECK': '1'}, check=True)
+
+          import google
+          import logging
+          from google.api_core.client_options import ClientOptions
+          from google.cloud import automl
+          import time
+          import json
+
+          logging.getLogger().setLevel(logging.INFO)  # TODO: make level configurable
+
+          if api_endpoint:
+            client_options = ClientOptions(api_endpoint=api_endpoint)
+            client = automl.AutoMlClient(client_options=client_options)
+          else:
+            client = automl.AutoMlClient()
+
+          # A resource that represents Google Cloud Platform location.
+          project_location = client.location_path(gcp_project_id, gcp_region)
+
+          print("List of model evaluations:")
+          for evaluation in client.list_model_evaluations(model_name, ""):
+            if evaluation.display_name == '':
+                logging.info("Model evaluation name: {}".format(evaluation.name))
+                logging.info(
+                    "Model annotation spec id: {}".format(
+                        evaluation.annotation_spec_id
+                    )
+                )
+                logging.info("Create Time:")
+                logging.info("\tseconds: {}".format(evaluation.create_time.seconds))
+                logging.info("\tnanos: {}".format(evaluation.create_time.nanos / 1e9))
+                logging.info(
+                    "Evaluation example count: {}".format(
+                    evaluation.evaluated_example_count
+                    )
+                )
+                logging.info(
+                    "Model evaluation metrics - auprc: {}".format(
+                        evaluation.classification_evaluation_metrics.au_prc
+                    )
+                )
+                auprc = evaluation.classification_evaluation_metrics.au_prc
+                for eva_num in evaluation.classification_evaluation_metrics.confidence_metrics_entry:
+                    if eva_num.confidence_threshold == 0.5:
+                        logging.info(
+                            "Model evaluation metrics (threshold = 0.5): {}".format(
+                                eva_num
+                            )
+                        )
+                        f1 = eva_num.f1_score
+                        recall = eva_num.recall
+                        precision = eva_num.precision
+                        break
+                break
+
+          print('overall threshold = 0.5, F1: {}, recall: {}, auprc: {}, precision: {}'.format(f1, recall, auprc, precision))
+
+          metrics = {
+            'metrics': [{
+              'name': 'precision-score', # The name of the metric. Visualized as the column name in the runs table.
+              'numberValue':  precision, # The value of the metric. Must be a numeric value.
+              'format': "PERCENTAGE",   # The optional format of the metric. Supported values are "RAW" (displayed in raw format) and "PERCENTAGE" (displayed in percentage format).
+            },
+            {
+              'name': 'recall-score', # The name of the metric. Visualized as the column name in the runs table.
+              'numberValue':  recall, # The value of the metric. Must be a numeric value.
+              'format': "PERCENTAGE",   # The optional format of the metric. Supported values are "RAW" (displayed in raw format) and "PERCENTAGE" (displayed in percentage format).
+            },
+            {
+              'name': 'f1-score', # The name of the metric. Visualized as the column name in the runs table.
+              'numberValue':  f1, # The value of the metric. Must be a numeric value.
+              'format': "PERCENTAGE",   # The optional format of the metric. Supported values are "RAW" (displayed in raw format) and "PERCENTAGE" (displayed in percentage format).
+            },
+            {
+              'name': 'auprc', # The name of the metric. Visualized as the column name in the runs table.
+              'numberValue':  auprc, # The value of the metric. Must be a numeric value.
+              'format': "PERCENTAGE",   # The optional format of the metric. Supported values are "RAW" (displayed in raw format) and "PERCENTAGE" (displayed in percentage format).
+            }
+            ]
+          }
+          with open(mlpipeline_metrics_path, 'w') as mlpipeline_metrics_file:
+            mlpipeline_metrics_file.write(json.dumps(metrics))
+
+          return (auprc, f1, recall, precision)
+
+        def _serialize_float(float_value: float) -> str:
+            if isinstance(float_value, str):
+                return float_value
+            if not isinstance(float_value, (float, int)):
+                raise TypeError('Value "{}" has type "{}" instead of float.'.format(str(float_value), str(type(float_value))))
+            return str(float_value)
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Automl evaluate model for nlp', description='')
+        _parser.add_argument("--gcp-project-id", dest="gcp_project_id", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--gcp-region", dest="gcp_region", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--api-endpoint", dest="api_endpoint", type=str, required=False, default=argparse.SUPPRESS)
+        _parser.add_argument("--model-name", dest="model_name", type=str, required=False, default=argparse.SUPPRESS)
+        _parser.add_argument("--mlpipeline-metrics", dest="mlpipeline_metrics_path", type=_make_parent_dirs_and_return_path, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("----output-paths", dest="_output_paths", type=str, nargs=4)
+        _parsed_args = vars(_parser.parse_args())
+        _output_files = _parsed_args.pop("_output_paths", [])
+
+        _outputs = automl_evaluate_model_for_nlp(**_parsed_args)
+
+        _output_serializers = [
+            _serialize_float,
+            _serialize_float,
+            _serialize_float,
+            _serialize_float,
+
+        ]
+
+        import os
+        for idx, output_file in enumerate(_output_files):
+            try:
+                os.makedirs(os.path.dirname(output_file))
+            except OSError:
+                pass
+            with open(output_file, 'w') as f:
+                f.write(_output_serializers[idx](_outputs[idx]))
+      image: python:3.7
+    inputs:
+      parameters:
+      - {name: api_endpoint}
+      - {name: automl-create-model-for-nlp-model_name}
+      - {name: gcp_project_id}
+      - {name: gcp_region}
+    outputs:
+      artifacts:
+      - {name: mlpipeline-metrics, path: /tmp/outputs/mlpipeline_metrics/data}
+      - {name: automl-evaluate-model-for-nlp-auprc, path: /tmp/outputs/auprc/data}
+      - {name: automl-evaluate-model-for-nlp-f1, path: /tmp/outputs/f1/data}
+      - {name: automl-evaluate-model-for-nlp-precision, path: /tmp/outputs/precision/data}
+      - {name: automl-evaluate-model-for-nlp-recall, path: /tmp/outputs/recall/data}
+    metadata:
+      annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
+          {"args": ["--gcp-project-id", {"inputValue": "gcp_project_id"}, "--gcp-region",
+          {"inputValue": "gcp_region"}, {"if": {"cond": {"isPresent": "api_endpoint"},
+          "then": ["--api-endpoint", {"inputValue": "api_endpoint"}]}}, {"if": {"cond":
+          {"isPresent": "model_name"}, "then": ["--model-name", {"inputValue": "model_name"}]}},
+          "--mlpipeline-metrics", {"outputPath": "mlpipeline_metrics"}, "----output-paths",
+          {"outputPath": "auprc"}, {"outputPath": "f1"}, {"outputPath": "recall"},
+          {"outputPath": "precision"}], "command": ["python3", "-u", "-c", "def _make_parent_dirs_and_return_path(file_path:
+          str):\n    import os\n    os.makedirs(os.path.dirname(file_path), exist_ok=True)\n    return
+          file_path\n\ndef automl_evaluate_model_for_nlp(\n  mlpipeline_metrics_path,\n  gcp_project_id,\n  gcp_region,\n  api_endpoint
+          = None,\n  model_name = None,\n):\n\n  import subprocess\n  import sys\n  #
+          we could build a base image that includes these libraries if we don''t want
+          to do\n  # the dynamic installation when the step runs.\n  subprocess.run([sys.executable,
+          ''-m'', ''pip'', ''install'', ''googleapis-common-protos==1.6.0'', ''--no-warn-script-location''],\n      env={''PIP_DISABLE_PIP_VERSION_CHECK'':
+          ''1''}, check=True)\n  subprocess.run([sys.executable, ''-m'', ''pip'',
+          ''install'', ''google-cloud-automl==0.9.0'', ''--quiet'', ''--no-warn-script-location''],\n      env={''PIP_DISABLE_PIP_VERSION_CHECK'':
+          ''1''}, check=True)\n\n  import google\n  import logging\n  from google.api_core.client_options
+          import ClientOptions\n  from google.cloud import automl\n  import time\n  import
+          json\n\n  logging.getLogger().setLevel(logging.INFO)  # TODO: make level
+          configurable\n\n  if api_endpoint:\n    client_options = ClientOptions(api_endpoint=api_endpoint)\n    client
+          = automl.AutoMlClient(client_options=client_options)\n  else:\n    client
+          = automl.AutoMlClient()\n\n  # A resource that represents Google Cloud Platform
+          location.\n  project_location = client.location_path(gcp_project_id, gcp_region)\n\n  print(\"List
+          of model evaluations:\")\n  for evaluation in client.list_model_evaluations(model_name,
+          \"\"):\n    if evaluation.display_name == '''':\n        logging.info(\"Model
+          evaluation name: {}\".format(evaluation.name))\n        logging.info(\n            \"Model
+          annotation spec id: {}\".format(\n                evaluation.annotation_spec_id\n            )\n        )\n        logging.info(\"Create
+          Time:\")\n        logging.info(\"\\tseconds: {}\".format(evaluation.create_time.seconds))\n        logging.info(\"\\tnanos:
+          {}\".format(evaluation.create_time.nanos / 1e9))\n        logging.info(\n            \"Evaluation
+          example count: {}\".format(\n            evaluation.evaluated_example_count\n            )\n        )\n        logging.info(\n            \"Model
+          evaluation metrics - auprc: {}\".format(\n                evaluation.classification_evaluation_metrics.au_prc\n            )\n        )\n        auprc
+          = evaluation.classification_evaluation_metrics.au_prc\n        for eva_num
+          in evaluation.classification_evaluation_metrics.confidence_metrics_entry:\n            if
+          eva_num.confidence_threshold == 0.5:\n                logging.info(\n                    \"Model
+          evaluation metrics (threshold = 0.5): {}\".format(\n                        eva_num\n                    )\n                )\n                f1
+          = eva_num.f1_score\n                recall = eva_num.recall\n                precision
+          = eva_num.precision\n                break\n        break\n\n  print(''overall
+          threshold = 0.5, F1: {}, recall: {}, auprc: {}, precision: {}''.format(f1,
+          recall, auprc, precision))\n\n  metrics = {\n    ''metrics'': [{\n      ''name'':
+          ''precision-score'', # The name of the metric. Visualized as the column
+          name in the runs table.\n      ''numberValue'':  precision, # The value
+          of the metric. Must be a numeric value.\n      ''format'': \"PERCENTAGE\",   #
+          The optional format of the metric. Supported values are \"RAW\" (displayed
+          in raw format) and \"PERCENTAGE\" (displayed in percentage format).\n    },\n    {\n      ''name'':
+          ''recall-score'', # The name of the metric. Visualized as the column name
+          in the runs table.\n      ''numberValue'':  recall, # The value of the metric.
+          Must be a numeric value.\n      ''format'': \"PERCENTAGE\",   # The optional
+          format of the metric. Supported values are \"RAW\" (displayed in raw format)
+          and \"PERCENTAGE\" (displayed in percentage format).\n    },\n    {\n      ''name'':
+          ''f1-score'', # The name of the metric. Visualized as the column name in
+          the runs table.\n      ''numberValue'':  f1, # The value of the metric.
+          Must be a numeric value.\n      ''format'': \"PERCENTAGE\",   # The optional
+          format of the metric. Supported values are \"RAW\" (displayed in raw format)
+          and \"PERCENTAGE\" (displayed in percentage format).\n    },\n    {\n      ''name'':
+          ''auprc'', # The name of the metric. Visualized as the column name in the
+          runs table.\n      ''numberValue'':  auprc, # The value of the metric. Must
+          be a numeric value.\n      ''format'': \"PERCENTAGE\",   # The optional
+          format of the metric. Supported values are \"RAW\" (displayed in raw format)
+          and \"PERCENTAGE\" (displayed in percentage format).\n    }\n    ]\n  }\n  with
+          open(mlpipeline_metrics_path, ''w'') as mlpipeline_metrics_file:\n    mlpipeline_metrics_file.write(json.dumps(metrics))\n\n  return
+          (auprc, f1, recall, precision)\n\ndef _serialize_float(float_value: float)
+          -> str:\n    if isinstance(float_value, str):\n        return float_value\n    if
+          not isinstance(float_value, (float, int)):\n        raise TypeError(''Value
+          \"{}\" has type \"{}\" instead of float.''.format(str(float_value), str(type(float_value))))\n    return
+          str(float_value)\n\nimport argparse\n_parser = argparse.ArgumentParser(prog=''Automl
+          evaluate model for nlp'', description='''')\n_parser.add_argument(\"--gcp-project-id\",
+          dest=\"gcp_project_id\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--gcp-region\",
+          dest=\"gcp_region\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--api-endpoint\",
+          dest=\"api_endpoint\", type=str, required=False, default=argparse.SUPPRESS)\n_parser.add_argument(\"--model-name\",
+          dest=\"model_name\", type=str, required=False, default=argparse.SUPPRESS)\n_parser.add_argument(\"--mlpipeline-metrics\",
+          dest=\"mlpipeline_metrics_path\", type=_make_parent_dirs_and_return_path,
+          required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"----output-paths\",
+          dest=\"_output_paths\", type=str, nargs=4)\n_parsed_args = vars(_parser.parse_args())\n_output_files
+          = _parsed_args.pop(\"_output_paths\", [])\n\n_outputs = automl_evaluate_model_for_nlp(**_parsed_args)\n\n_output_serializers
+          = [\n    _serialize_float,\n    _serialize_float,\n    _serialize_float,\n    _serialize_float,\n\n]\n\nimport
+          os\nfor idx, output_file in enumerate(_output_files):\n    try:\n        os.makedirs(os.path.dirname(output_file))\n    except
+          OSError:\n        pass\n    with open(output_file, ''w'') as f:\n        f.write(_output_serializers[idx](_outputs[idx]))\n"],
+          "image": "python:3.7"}}, "inputs": [{"name": "gcp_project_id", "type": "String"},
+          {"name": "gcp_region", "type": "String"}, {"name": "api_endpoint", "optional":
+          true, "type": "String"}, {"name": "model_name", "optional": true, "type":
+          "String"}], "name": "Automl evaluate model for nlp", "outputs": [{"name":
+          "mlpipeline_metrics", "type": "UI_metrics"}, {"name": "auprc", "type": "Float"},
+          {"name": "f1", "type": "Float"}, {"name": "recall", "type": "Float"}, {"name":
+          "precision", "type": "Float"}]}', pipelines.kubeflow.org/component_ref: '{"digest":
+          "fff87ca54a59294fff74ae6daac9fe4796a9a8569e0599b07a049a2168728f72", "url":
+          "./create_model/evaluate_component.yaml"}'}
+  - name: automl-import-data-for-nlp
+    container:
+      args: [--gcs-path, '{{inputs.parameters.gcs_path}}', --gcp-project-id, '{{inputs.parameters.gcp_project_id}}',
+        --gcp-region, '{{inputs.parameters.gcp_region}}', --dataset-id, '{{inputs.parameters.automl-create-dataset-for-nlp-dataset_id}}',
+        --api-endpoint, '{{inputs.parameters.api_endpoint}}', '----output-paths',
+        /tmp/outputs/dataset_id/data]
+      command:
+      - python3
+      - -u
+      - -c
+      - |
+        def automl_import_data_for_nlp(
+          # dataset_path,
+          gcs_path,
+          gcp_project_id,
+          gcp_region,
+          dataset_id,
+          api_endpoint = None,
+        ):
+          import sys
+          import subprocess
+          subprocess.run([sys.executable, '-m', 'pip', 'install', 'googleapis-common-protos==1.6.0',
+              '--no-warn-script-location'], env={'PIP_DISABLE_PIP_VERSION_CHECK': '1'}, check=True)
+          subprocess.run([sys.executable, '-m', 'pip', 'install', 'google-cloud-automl==0.9.0', '--quiet',
+              '--no-warn-script-location'], env={'PIP_DISABLE_PIP_VERSION_CHECK': '1'}, check=True)
+
+          import google
+          import logging
+          from google.api_core.client_options import ClientOptions
+          from google.cloud import automl
+
+          logging.getLogger().setLevel(logging.INFO)  # TODO: make level configurable
+
+          if api_endpoint:
+            client_options = ClientOptions(api_endpoint=api_endpoint)
+            client = automl.AutoMlClient(client_options=client_options)
+          else:
+            client = automl.AutoMlClient()
+
+          dataset_full_id = client.dataset_path(gcp_project_id, gcp_region, dataset_id)
+          current_dataset = client.get_dataset(dataset_full_id)
+          if current_dataset.example_count > 0:
+            logging.info("Dataset has data already.")
+            logging.info("Dataset example count: {}".format(current_dataset.example_count))
+
+          # Get the multiple Google Cloud Storage URIs.
+          input_uris = gcs_path.split(",")
+          gcs_source = automl.types.GcsSource(input_uris=input_uris)
+          input_config = automl.types.InputConfig(gcs_source=gcs_source)
+          #dataset_full_id = client.dataset_path(gcp_project_id, gcp_region, dataset_id)
+
+          response = client.import_data(dataset_full_id, input_config)
+
+          logging.info("Processing import... This can take a while.")
+          # synchronous check of operation status.
+          logging.info("Data imported. {}".format(response.result()))
+          logging.info("Response metadata: {}".format(response.metadata))
+          logging.info("Operation name: {}".format(response.operation.name))
+
+          logging.info("Dataset id: {}".format(dataset_id))
+          return [dataset_id]
+
+        def _serialize_str(str_value: str) -> str:
+            if not isinstance(str_value, str):
+                raise TypeError('Value "{}" has type "{}" instead of str.'.format(str(str_value), str(type(str_value))))
+            return str_value
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Automl import data for nlp', description='')
+        _parser.add_argument("--gcs-path", dest="gcs_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--gcp-project-id", dest="gcp_project_id", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--gcp-region", dest="gcp_region", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--dataset-id", dest="dataset_id", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--api-endpoint", dest="api_endpoint", type=str, required=False, default=argparse.SUPPRESS)
+        _parser.add_argument("----output-paths", dest="_output_paths", type=str, nargs=1)
+        _parsed_args = vars(_parser.parse_args())
+        _output_files = _parsed_args.pop("_output_paths", [])
+
+        _outputs = automl_import_data_for_nlp(**_parsed_args)
+
+        _output_serializers = [
+            _serialize_str,
+
+        ]
+
+        import os
+        for idx, output_file in enumerate(_output_files):
+            try:
+                os.makedirs(os.path.dirname(output_file))
+            except OSError:
+                pass
+            with open(output_file, 'w') as f:
+                f.write(_output_serializers[idx](_outputs[idx]))
+      image: python:3.7
+    inputs:
+      parameters:
+      - {name: api_endpoint}
+      - {name: automl-create-dataset-for-nlp-dataset_id}
+      - {name: gcp_project_id}
+      - {name: gcp_region}
+      - {name: gcs_path}
+    outputs:
+      parameters:
+      - name: automl-import-data-for-nlp-dataset_id
+        valueFrom: {path: /tmp/outputs/dataset_id/data}
+      artifacts:
+      - {name: automl-import-data-for-nlp-dataset_id, path: /tmp/outputs/dataset_id/data}
+    metadata:
+      annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
+          {"args": ["--gcs-path", {"inputValue": "gcs_path"}, "--gcp-project-id",
+          {"inputValue": "gcp_project_id"}, "--gcp-region", {"inputValue": "gcp_region"},
+          "--dataset-id", {"inputValue": "dataset_id"}, {"if": {"cond": {"isPresent":
+          "api_endpoint"}, "then": ["--api-endpoint", {"inputValue": "api_endpoint"}]}},
+          "----output-paths", {"outputPath": "dataset_id"}], "command": ["python3",
+          "-u", "-c", "def automl_import_data_for_nlp(\n  # dataset_path,\n  gcs_path,\n  gcp_project_id,\n  gcp_region,\n  dataset_id,\n  api_endpoint
+          = None,\n):\n  import sys\n  import subprocess\n  subprocess.run([sys.executable,
+          ''-m'', ''pip'', ''install'', ''googleapis-common-protos==1.6.0'',\n      ''--no-warn-script-location''],
+          env={''PIP_DISABLE_PIP_VERSION_CHECK'': ''1''}, check=True)\n  subprocess.run([sys.executable,
+          ''-m'', ''pip'', ''install'', ''google-cloud-automl==0.9.0'', ''--quiet'',\n      ''--no-warn-script-location''],
+          env={''PIP_DISABLE_PIP_VERSION_CHECK'': ''1''}, check=True)\n\n  import
+          google\n  import logging\n  from google.api_core.client_options import ClientOptions\n  from
+          google.cloud import automl\n\n  logging.getLogger().setLevel(logging.INFO)  #
+          TODO: make level configurable\n\n  if api_endpoint:\n    client_options
+          = ClientOptions(api_endpoint=api_endpoint)\n    client = automl.AutoMlClient(client_options=client_options)\n  else:\n    client
+          = automl.AutoMlClient()\n\n  dataset_full_id = client.dataset_path(gcp_project_id,
+          gcp_region, dataset_id)\n  current_dataset = client.get_dataset(dataset_full_id)\n  if
+          current_dataset.example_count > 0:\n    logging.info(\"Dataset has data
+          already.\")\n    logging.info(\"Dataset example count: {}\".format(current_dataset.example_count))\n\n  #
+          Get the multiple Google Cloud Storage URIs.\n  input_uris = gcs_path.split(\",\")\n  gcs_source
+          = automl.types.GcsSource(input_uris=input_uris)\n  input_config = automl.types.InputConfig(gcs_source=gcs_source)\n  #dataset_full_id
+          = client.dataset_path(gcp_project_id, gcp_region, dataset_id)\n\n  response
+          = client.import_data(dataset_full_id, input_config)\n\n  logging.info(\"Processing
+          import... This can take a while.\")\n  # synchronous check of operation
+          status.\n  logging.info(\"Data imported. {}\".format(response.result()))\n  logging.info(\"Response
+          metadata: {}\".format(response.metadata))\n  logging.info(\"Operation name:
+          {}\".format(response.operation.name))\n\n  logging.info(\"Dataset id: {}\".format(dataset_id))\n  return
+          [dataset_id]\n\ndef _serialize_str(str_value: str) -> str:\n    if not isinstance(str_value,
+          str):\n        raise TypeError(''Value \"{}\" has type \"{}\" instead of
+          str.''.format(str(str_value), str(type(str_value))))\n    return str_value\n\nimport
+          argparse\n_parser = argparse.ArgumentParser(prog=''Automl import data for
+          nlp'', description='''')\n_parser.add_argument(\"--gcs-path\", dest=\"gcs_path\",
+          type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--gcp-project-id\",
+          dest=\"gcp_project_id\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--gcp-region\",
+          dest=\"gcp_region\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--dataset-id\",
+          dest=\"dataset_id\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--api-endpoint\",
+          dest=\"api_endpoint\", type=str, required=False, default=argparse.SUPPRESS)\n_parser.add_argument(\"----output-paths\",
+          dest=\"_output_paths\", type=str, nargs=1)\n_parsed_args = vars(_parser.parse_args())\n_output_files
+          = _parsed_args.pop(\"_output_paths\", [])\n\n_outputs = automl_import_data_for_nlp(**_parsed_args)\n\n_output_serializers
+          = [\n    _serialize_str,\n\n]\n\nimport os\nfor idx, output_file in enumerate(_output_files):\n    try:\n        os.makedirs(os.path.dirname(output_file))\n    except
+          OSError:\n        pass\n    with open(output_file, ''w'') as f:\n        f.write(_output_serializers[idx](_outputs[idx]))\n"],
+          "image": "python:3.7"}}, "inputs": [{"name": "gcs_path", "type": "String"},
+          {"name": "gcp_project_id", "type": "String"}, {"name": "gcp_region", "type":
+          "String"}, {"name": "dataset_id", "type": "String"}, {"name": "api_endpoint",
+          "optional": true, "type": "String"}], "name": "Automl import data for nlp",
+          "outputs": [{"name": "dataset_id", "type": "String"}]}', pipelines.kubeflow.org/component_ref: '{"digest":
+          "adcb2e10e973e16465c971d1708d1270e1a9d647260fa4dacca0fe6426c9d94f", "url":
+          "./import_data_from_gcs/import_component.yaml"}'}
+  - name: automl-nlp
+    inputs:
+      parameters:
+      - {name: api_endpoint}
+      - {name: dataset_display_name}
+      - {name: gcp_project_id}
+      - {name: gcp_region}
+      - {name: gcs_path}
+      - {name: model_prefix}
+    dag:
+      tasks:
+      - name: automl-create-dataset-for-nlp
+        template: automl-create-dataset-for-nlp
+        arguments:
+          parameters:
+          - {name: api_endpoint, value: '{{inputs.parameters.api_endpoint}}'}
+          - {name: dataset_display_name, value: '{{inputs.parameters.dataset_display_name}}'}
+          - {name: gcp_project_id, value: '{{inputs.parameters.gcp_project_id}}'}
+          - {name: gcp_region, value: '{{inputs.parameters.gcp_region}}'}
+      - name: automl-create-model-for-nlp
+        template: automl-create-model-for-nlp
+        dependencies: [automl-import-data-for-nlp]
+        arguments:
+          parameters:
+          - {name: api_endpoint, value: '{{inputs.parameters.api_endpoint}}'}
+          - {name: automl-import-data-for-nlp-dataset_id, value: '{{tasks.automl-import-data-for-nlp.outputs.parameters.automl-import-data-for-nlp-dataset_id}}'}
+          - {name: gcp_project_id, value: '{{inputs.parameters.gcp_project_id}}'}
+          - {name: gcp_region, value: '{{inputs.parameters.gcp_region}}'}
+          - {name: model_prefix, value: '{{inputs.parameters.model_prefix}}'}
+      - name: automl-deploy-nlp-model
+        template: automl-deploy-nlp-model
+        dependencies: [automl-create-model-for-nlp]
+        arguments:
+          parameters:
+          - {name: api_endpoint, value: '{{inputs.parameters.api_endpoint}}'}
+          - {name: automl-create-model-for-nlp-model_display_name, value: '{{tasks.automl-create-model-for-nlp.outputs.parameters.automl-create-model-for-nlp-model_display_name}}'}
+          - {name: automl-create-model-for-nlp-model_id, value: '{{tasks.automl-create-model-for-nlp.outputs.parameters.automl-create-model-for-nlp-model_id}}'}
+          - {name: gcp_project_id, value: '{{inputs.parameters.gcp_project_id}}'}
+          - {name: gcp_region, value: '{{inputs.parameters.gcp_region}}'}
+      - name: automl-evaluate-model-for-nlp
+        template: automl-evaluate-model-for-nlp
+        dependencies: [automl-create-model-for-nlp]
+        arguments:
+          parameters:
+          - {name: api_endpoint, value: '{{inputs.parameters.api_endpoint}}'}
+          - {name: automl-create-model-for-nlp-model_name, value: '{{tasks.automl-create-model-for-nlp.outputs.parameters.automl-create-model-for-nlp-model_name}}'}
+          - {name: gcp_project_id, value: '{{inputs.parameters.gcp_project_id}}'}
+          - {name: gcp_region, value: '{{inputs.parameters.gcp_region}}'}
+      - name: automl-import-data-for-nlp
+        template: automl-import-data-for-nlp
+        dependencies: [automl-create-dataset-for-nlp]
+        arguments:
+          parameters:
+          - {name: api_endpoint, value: '{{inputs.parameters.api_endpoint}}'}
+          - {name: automl-create-dataset-for-nlp-dataset_id, value: '{{tasks.automl-create-dataset-for-nlp.outputs.parameters.automl-create-dataset-for-nlp-dataset_id}}'}
+          - {name: gcp_project_id, value: '{{inputs.parameters.gcp_project_id}}'}
+          - {name: gcp_region, value: '{{inputs.parameters.gcp_region}}'}
+          - {name: gcs_path, value: '{{inputs.parameters.gcs_path}}'}
+      - name: config-firestore
+        template: config-firestore
+        dependencies: [automl-deploy-nlp-model]
+        arguments:
+          parameters:
+          - {name: automl-deploy-nlp-model-model_id, value: '{{tasks.automl-deploy-nlp-model.outputs.parameters.automl-deploy-nlp-model-model_id}}'}
+          - {name: gcp_project_id, value: '{{inputs.parameters.gcp_project_id}}'}
+          - {name: gcp_region, value: '{{inputs.parameters.gcp_region}}'}
+  - name: config-firestore
+    container:
+      args: [--gcp-project-id, '{{inputs.parameters.gcp_project_id}}', --gcp-region,
+        '{{inputs.parameters.gcp_region}}', --model-id, '{{inputs.parameters.automl-deploy-nlp-model-model_id}}',
+        '----output-paths', /tmp/outputs/collection/data, /tmp/outputs/document/data]
+      command:
+      - python3
+      - -u
+      - -c
+      - "def config_firestore(\n  gcp_project_id,\n  gcp_region,\n  model_id,\n):\n\
+        \  import sys\n  import subprocess\n  subprocess.run([sys.executable, '-m',\
+        \ 'pip', 'install', 'googleapis-common-protos==1.6.0',\n      '--no-warn-script-location'],\
+        \ env={'PIP_DISABLE_PIP_VERSION_CHECK': '1'}, check=True)\n  subprocess.run([sys.executable,\
+        \ '-m', 'pip', 'install', 'google-cloud-firestore==1.6.2', '--quiet',\n  \
+        \    '--no-warn-script-location'], env={'PIP_DISABLE_PIP_VERSION_CHECK': '1'},\
+        \ check=True)\n\n  import google\n  import logging\n  from google.api_core.client_options\
+        \ import ClientOptions\n  from google.cloud import firestore\n\n  #logging.getLogger().setLevel(logging.INFO)\
+        \  # TODO: make level configurable\n  db = firestore.Client()\n  collection_name\
+        \ = 'nlp_config'\n  document_name = 'automl_config'\n  app_template = db.collection('nlp_config').document('automl_config')\n\
+        \  app_template.set({'model_id': model_id})  \n  return (collection_name,\
+        \ document_name)\n\ndef _serialize_str(str_value: str) -> str:\n    if not\
+        \ isinstance(str_value, str):\n        raise TypeError('Value \"{}\" has type\
+        \ \"{}\" instead of str.'.format(str(str_value), str(type(str_value))))\n\
+        \    return str_value\n\nimport argparse\n_parser = argparse.ArgumentParser(prog='Config\
+        \ firestore', description='')\n_parser.add_argument(\"--gcp-project-id\",\
+        \ dest=\"gcp_project_id\", type=str, required=True, default=argparse.SUPPRESS)\n\
+        _parser.add_argument(\"--gcp-region\", dest=\"gcp_region\", type=str, required=True,\
+        \ default=argparse.SUPPRESS)\n_parser.add_argument(\"--model-id\", dest=\"\
+        model_id\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"\
+        ----output-paths\", dest=\"_output_paths\", type=str, nargs=2)\n_parsed_args\
+        \ = vars(_parser.parse_args())\n_output_files = _parsed_args.pop(\"_output_paths\"\
+        , [])\n\n_outputs = config_firestore(**_parsed_args)\n\n_output_serializers\
+        \ = [\n    _serialize_str,\n    _serialize_str,\n\n]\n\nimport os\nfor idx,\
+        \ output_file in enumerate(_output_files):\n    try:\n        os.makedirs(os.path.dirname(output_file))\n\
+        \    except OSError:\n        pass\n    with open(output_file, 'w') as f:\n\
+        \        f.write(_output_serializers[idx](_outputs[idx]))\n"
+      image: python:3.7
+    inputs:
+      parameters:
+      - {name: automl-deploy-nlp-model-model_id}
+      - {name: gcp_project_id}
+      - {name: gcp_region}
+    outputs:
+      artifacts:
+      - {name: config-firestore-collection, path: /tmp/outputs/collection/data}
+      - {name: config-firestore-document, path: /tmp/outputs/document/data}
+    metadata:
+      annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
+          {"args": ["--gcp-project-id", {"inputValue": "gcp_project_id"}, "--gcp-region",
+          {"inputValue": "gcp_region"}, "--model-id", {"inputValue": "model_id"},
+          "----output-paths", {"outputPath": "collection"}, {"outputPath": "document"}],
+          "command": ["python3", "-u", "-c", "def config_firestore(\n  gcp_project_id,\n  gcp_region,\n  model_id,\n):\n  import
+          sys\n  import subprocess\n  subprocess.run([sys.executable, ''-m'', ''pip'',
+          ''install'', ''googleapis-common-protos==1.6.0'',\n      ''--no-warn-script-location''],
+          env={''PIP_DISABLE_PIP_VERSION_CHECK'': ''1''}, check=True)\n  subprocess.run([sys.executable,
+          ''-m'', ''pip'', ''install'', ''google-cloud-firestore==1.6.2'', ''--quiet'',\n      ''--no-warn-script-location''],
+          env={''PIP_DISABLE_PIP_VERSION_CHECK'': ''1''}, check=True)\n\n  import
+          google\n  import logging\n  from google.api_core.client_options import ClientOptions\n  from
+          google.cloud import firestore\n\n  #logging.getLogger().setLevel(logging.INFO)  #
+          TODO: make level configurable\n  db = firestore.Client()\n  collection_name
+          = ''nlp_config''\n  document_name = ''automl_config''\n  app_template =
+          db.collection(''nlp_config'').document(''automl_config'')\n  app_template.set({''model_id'':
+          model_id})  \n  return (collection_name, document_name)\n\ndef _serialize_str(str_value:
+          str) -> str:\n    if not isinstance(str_value, str):\n        raise TypeError(''Value
+          \"{}\" has type \"{}\" instead of str.''.format(str(str_value), str(type(str_value))))\n    return
+          str_value\n\nimport argparse\n_parser = argparse.ArgumentParser(prog=''Config
+          firestore'', description='''')\n_parser.add_argument(\"--gcp-project-id\",
+          dest=\"gcp_project_id\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--gcp-region\",
+          dest=\"gcp_region\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--model-id\",
+          dest=\"model_id\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"----output-paths\",
+          dest=\"_output_paths\", type=str, nargs=2)\n_parsed_args = vars(_parser.parse_args())\n_output_files
+          = _parsed_args.pop(\"_output_paths\", [])\n\n_outputs = config_firestore(**_parsed_args)\n\n_output_serializers
+          = [\n    _serialize_str,\n    _serialize_str,\n\n]\n\nimport os\nfor idx,
+          output_file in enumerate(_output_files):\n    try:\n        os.makedirs(os.path.dirname(output_file))\n    except
+          OSError:\n        pass\n    with open(output_file, ''w'') as f:\n        f.write(_output_serializers[idx](_outputs[idx]))\n"],
+          "image": "python:3.7"}}, "inputs": [{"name": "gcp_project_id", "type": "String"},
+          {"name": "gcp_region", "type": "String"}, {"name": "model_id", "type": "String"}],
+          "name": "Config firestore", "outputs": [{"name": "collection", "type": "String"},
+          {"name": "document", "type": "String"}]}', pipelines.kubeflow.org/component_ref: '{"digest":
+          "0c95bf2f9ea656dcf326d528aebd4e0eedd7f7e73a118ce9d422adf7fbb6894f", "url":
+          "./param_firestore/firestore_component.yaml"}'}
+  arguments:
+    parameters:
+    - {name: gcp_project_id}
+    - {name: gcp_region, value: us-central1}
+    - {name: dataset_display_name}
+    - {name: api_endpoint}
+    - {name: gcs_path}
+    - {name: model_prefix, value: nlpmodel}
+  serviceAccountName: pipeline-runner

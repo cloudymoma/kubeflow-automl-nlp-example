@@ -1,0 +1,115 @@
+name: Automl import data for nlp
+inputs:
+- {name: gcs_path, type: String}
+- {name: gcp_project_id, type: String}
+- {name: gcp_region, type: String}
+- {name: dataset_id, type: String}
+- {name: api_endpoint, type: String, optional: true}
+outputs:
+- {name: dataset_id, type: String}
+implementation:
+  container:
+    image: python:3.7
+    command:
+    - python3
+    - -u
+    - -c
+    - |
+      def automl_import_data_for_nlp(
+        # dataset_path,
+        gcs_path,
+        gcp_project_id,
+        gcp_region,
+        dataset_id,
+        api_endpoint = None,
+      ):
+        import sys
+        import subprocess
+        subprocess.run([sys.executable, '-m', 'pip', 'install', 'googleapis-common-protos==1.6.0',
+            '--no-warn-script-location'], env={'PIP_DISABLE_PIP_VERSION_CHECK': '1'}, check=True)
+        subprocess.run([sys.executable, '-m', 'pip', 'install', 'google-cloud-automl==0.9.0', '--quiet',
+            '--no-warn-script-location'], env={'PIP_DISABLE_PIP_VERSION_CHECK': '1'}, check=True)
+
+        import google
+        import logging
+        from google.api_core.client_options import ClientOptions
+        from google.cloud import automl
+
+        logging.getLogger().setLevel(logging.INFO)  # TODO: make level configurable
+
+        if api_endpoint:
+          client_options = ClientOptions(api_endpoint=api_endpoint)
+          client = automl.AutoMlClient(client_options=client_options)
+        else:
+          client = automl.AutoMlClient()
+
+        dataset_full_id = client.dataset_path(gcp_project_id, gcp_region, dataset_id)
+        current_dataset = client.get_dataset(dataset_full_id)
+        if current_dataset.example_count > 0:
+          logging.info("Dataset has data already.")
+          logging.info("Dataset example count: {}".format(current_dataset.example_count))
+
+        # Get the multiple Google Cloud Storage URIs.
+        input_uris = gcs_path.split(",")
+        gcs_source = automl.types.GcsSource(input_uris=input_uris)
+        input_config = automl.types.InputConfig(gcs_source=gcs_source)
+        #dataset_full_id = client.dataset_path(gcp_project_id, gcp_region, dataset_id)
+
+        response = client.import_data(dataset_full_id, input_config)
+
+        logging.info("Processing import... This can take a while.")
+        # synchronous check of operation status.
+        logging.info("Data imported. {}".format(response.result()))
+        logging.info("Response metadata: {}".format(response.metadata))
+        logging.info("Operation name: {}".format(response.operation.name))
+
+        logging.info("Dataset id: {}".format(dataset_id))
+        return [dataset_id]
+
+      def _serialize_str(str_value: str) -> str:
+          if not isinstance(str_value, str):
+              raise TypeError('Value "{}" has type "{}" instead of str.'.format(str(str_value), str(type(str_value))))
+          return str_value
+
+      import argparse
+      _parser = argparse.ArgumentParser(prog='Automl import data for nlp', description='')
+      _parser.add_argument("--gcs-path", dest="gcs_path", type=str, required=True, default=argparse.SUPPRESS)
+      _parser.add_argument("--gcp-project-id", dest="gcp_project_id", type=str, required=True, default=argparse.SUPPRESS)
+      _parser.add_argument("--gcp-region", dest="gcp_region", type=str, required=True, default=argparse.SUPPRESS)
+      _parser.add_argument("--dataset-id", dest="dataset_id", type=str, required=True, default=argparse.SUPPRESS)
+      _parser.add_argument("--api-endpoint", dest="api_endpoint", type=str, required=False, default=argparse.SUPPRESS)
+      _parser.add_argument("----output-paths", dest="_output_paths", type=str, nargs=1)
+      _parsed_args = vars(_parser.parse_args())
+      _output_files = _parsed_args.pop("_output_paths", [])
+
+      _outputs = automl_import_data_for_nlp(**_parsed_args)
+
+      _output_serializers = [
+          _serialize_str,
+
+      ]
+
+      import os
+      for idx, output_file in enumerate(_output_files):
+          try:
+              os.makedirs(os.path.dirname(output_file))
+          except OSError:
+              pass
+          with open(output_file, 'w') as f:
+              f.write(_output_serializers[idx](_outputs[idx]))
+    args:
+    - --gcs-path
+    - {inputValue: gcs_path}
+    - --gcp-project-id
+    - {inputValue: gcp_project_id}
+    - --gcp-region
+    - {inputValue: gcp_region}
+    - --dataset-id
+    - {inputValue: dataset_id}
+    - if:
+        cond: {isPresent: api_endpoint}
+        then:
+        - --api-endpoint
+        - {inputValue: api_endpoint}
+    - '----output-paths'
+    - {outputPath: dataset_id}

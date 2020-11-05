@@ -1,0 +1,125 @@
+name: Automl create dataset for nlp
+inputs:
+- {name: gcp_project_id, type: String}
+- {name: gcp_region, type: String}
+- {name: dataset_display_name, type: String}
+- {name: api_endpoint, type: String, optional: true}
+outputs:
+- {name: dataset_path, type: String}
+- {name: dataset_status, type: String}
+- {name: dataset_id, type: String}
+implementation:
+  container:
+    image: python:3.7
+    command:
+    - python3
+    - -u
+    - -c
+    - |
+      def automl_create_dataset_for_nlp(
+        gcp_project_id,
+        gcp_region,
+        dataset_display_name,
+        api_endpoint = None,
+      ):
+
+        import sys
+        import subprocess
+        subprocess.run([sys.executable, '-m', 'pip', 'install', 'googleapis-common-protos==1.6.0',
+            '--no-warn-script-location'],
+            env={'PIP_DISABLE_PIP_VERSION_CHECK': '1'}, check=True)
+        subprocess.run([sys.executable, '-m', 'pip', 'install', 'google-cloud-automl==0.9.0',
+            '--quiet', '--no-warn-script-location'],
+            env={'PIP_DISABLE_PIP_VERSION_CHECK': '1'}, check=True)
+
+        import google
+        import logging
+        from google.api_core.client_options import ClientOptions
+        from google.cloud import automl
+
+        logging.getLogger().setLevel(logging.INFO)  # TODO: make level configurable
+
+        if api_endpoint:
+          client_options = ClientOptions(api_endpoint=api_endpoint)
+          client = automl.AutoMlClient(client_options=client_options)
+        else:
+          client = automl.AutoMlClient()
+
+        status = 'created'
+        project_location = client.location_path(gcp_project_id, gcp_region)
+        # Check if dataset is existed.
+        for element in client.list_datasets(project_location):
+          if element.display_name == dataset_display_name:
+            status = 'created but existed'
+            if element.example_count == 0:
+              status = 'existed but empty'
+              return (element.name, status, element.name.rsplit('/', 1)[-1])
+        try:
+          metadata = automl.types.TextClassificationDatasetMetadata(classification_type=automl.enums.ClassificationType.MULTICLASS)
+          dataset = automl.types.Dataset(display_name=dataset_display_name, text_classification_dataset_metadata=metadata,)
+          # Create a dataset with the given display name
+          response = client.create_dataset(project_location, dataset)
+          created_dataset = response.result()
+          # Log info about the created dataset
+          logging.info("Dataset name: {}".format(created_dataset.name))
+          logging.info("Dataset id: {}".format(created_dataset.name.split("/")[-1]))
+          logging.info("Dataset display name: {}".format(dataset.display_name))
+          logging.info("Dataset example count: {}".format(dataset.example_count))
+          logging.info("Dataset create time:")
+          logging.info("\tseconds: {}".format(dataset.create_time.seconds))
+          logging.info("\tnanos: {}".format(dataset.create_time.nanos))
+
+          dataset_id = created_dataset.name.rsplit('/', 1)[-1]
+          return (created_dataset.name, status, dataset_id)
+        except google.api_core.exceptions.GoogleAPICallError as e:
+          logging.warning(e)
+          raise e
+
+      def _serialize_str(str_value: str) -> str:
+          if not isinstance(str_value, str):
+              raise TypeError('Value "{}" has type "{}" instead of str.'.format(str(str_value), str(type(str_value))))
+          return str_value
+
+      import argparse
+      _parser = argparse.ArgumentParser(prog='Automl create dataset for nlp', description='')
+      _parser.add_argument("--gcp-project-id", dest="gcp_project_id", type=str, required=True, default=argparse.SUPPRESS)
+      _parser.add_argument("--gcp-region", dest="gcp_region", type=str, required=True, default=argparse.SUPPRESS)
+      _parser.add_argument("--dataset-display-name", dest="dataset_display_name", type=str, required=True, default=argparse.SUPPRESS)
+      _parser.add_argument("--api-endpoint", dest="api_endpoint", type=str, required=False, default=argparse.SUPPRESS)
+      _parser.add_argument("----output-paths", dest="_output_paths", type=str, nargs=3)
+      _parsed_args = vars(_parser.parse_args())
+      _output_files = _parsed_args.pop("_output_paths", [])
+
+      _outputs = automl_create_dataset_for_nlp(**_parsed_args)
+
+      _output_serializers = [
+          _serialize_str,
+          _serialize_str,
+          _serialize_str,
+
+      ]
+
+      import os
+      for idx, output_file in enumerate(_output_files):
+          try:
+              os.makedirs(os.path.dirname(output_file))
+          except OSError:
+              pass
+          with open(output_file, 'w') as f:
+              f.write(_output_serializers[idx](_outputs[idx]))
+    args:
+    - --gcp-project-id
+    - {inputValue: gcp_project_id}
+    - --gcp-region
+    - {inputValue: gcp_region}
+    - --dataset-display-name
+    - {inputValue: dataset_display_name}
+    - if:
+        cond: {isPresent: api_endpoint}
+        then:
+        - --api-endpoint
+        - {inputValue: api_endpoint}
+    - '----output-paths'
+    - {outputPath: dataset_path}
+    - {outputPath: dataset_status}
+    - {outputPath: dataset_id}

@@ -1,0 +1,3 @@
+kfp==1.0.0
+kfp-server-api==1.0.0
+google-auth==1.6.3

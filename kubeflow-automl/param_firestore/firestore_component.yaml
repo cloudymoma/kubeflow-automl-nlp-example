@@ -1,0 +1,51 @@
+name: Config firestore
+inputs:
+- {name: gcp_project_id, type: String}
+- {name: gcp_region, type: String}
+- {name: model_id, type: String}
+outputs:
+- {name: collection, type: String}
+- {name: document, type: String}
+implementation:
+  container:
+    image: python:3.7
+    command:
+    - python3
+    - -u
+    - -c
+    - "def config_firestore(\n  gcp_project_id,\n  gcp_region,\n  model_id,\n):\n\
+      \  import sys\n  import subprocess\n  subprocess.run([sys.executable, '-m',\
+      \ 'pip', 'install', 'googleapis-common-protos==1.6.0',\n      '--no-warn-script-location'],\
+      \ env={'PIP_DISABLE_PIP_VERSION_CHECK': '1'}, check=True)\n  subprocess.run([sys.executable,\
+      \ '-m', 'pip', 'install', 'google-cloud-firestore==1.6.2', '--quiet',\n    \
+      \  '--no-warn-script-location'], env={'PIP_DISABLE_PIP_VERSION_CHECK': '1'},\
+      \ check=True)\n\n  import google\n  import logging\n  from google.api_core.client_options\
+      \ import ClientOptions\n  from google.cloud import firestore\n\n  #logging.getLogger().setLevel(logging.INFO)\
+      \  # TODO: make level configurable\n  db = firestore.Client()\n  collection_name\
+      \ = 'nlp_config'\n  document_name = 'automl_config'\n  app_template = db.collection('nlp_config').document('automl_config')\n\
+      \  app_template.set({'model_id': model_id})  \n  return (collection_name, document_name)\n\
+      \ndef _serialize_str(str_value: str) -> str:\n    if not isinstance(str_value,\
+      \ str):\n        raise TypeError('Value \"{}\" has type \"{}\" instead of str.'.format(str(str_value),\
+      \ str(type(str_value))))\n    return str_value\n\nimport argparse\n_parser =\
+      \ argparse.ArgumentParser(prog='Config firestore', description='')\n_parser.add_argument(\"\
+      --gcp-project-id\", dest=\"gcp_project_id\", type=str, required=True, default=argparse.SUPPRESS)\n\
+      _parser.add_argument(\"--gcp-region\", dest=\"gcp_region\", type=str, required=True,\
+      \ default=argparse.SUPPRESS)\n_parser.add_argument(\"--model-id\", dest=\"model_id\"\
+      , type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"\
+      ----output-paths\", dest=\"_output_paths\", type=str, nargs=2)\n_parsed_args\
+      \ = vars(_parser.parse_args())\n_output_files = _parsed_args.pop(\"_output_paths\"\
+      , [])\n\n_outputs = config_firestore(**_parsed_args)\n\n_output_serializers\
+      \ = [\n    _serialize_str,\n    _serialize_str,\n\n]\n\nimport os\nfor idx,\
+      \ output_file in enumerate(_output_files):\n    try:\n        os.makedirs(os.path.dirname(output_file))\n\
+      \    except OSError:\n        pass\n    with open(output_file, 'w') as f:\n\
+      \        f.write(_output_serializers[idx](_outputs[idx]))\n"
+    args:
+    - --gcp-project-id
+    - {inputValue: gcp_project_id}
+    - --gcp-region
+    - {inputValue: gcp_region}
+    - --model-id
+    - {inputValue: model_id}
+    - '----output-paths'
+    - {outputPath: collection}
+    - {outputPath: document}

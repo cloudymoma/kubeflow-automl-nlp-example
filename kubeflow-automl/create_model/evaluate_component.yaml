@@ -1,0 +1,184 @@
+name: Automl evaluate model for nlp
+inputs:
+- {name: gcp_project_id, type: String}
+- {name: gcp_region, type: String}
+- {name: api_endpoint, type: String, optional: true}
+- {name: model_name, type: String, optional: true}
+outputs:
+- {name: mlpipeline_metrics, type: UI_metrics}
+- {name: auprc, type: Float}
+- {name: f1, type: Float}
+- {name: recall, type: Float}
+- {name: precision, type: Float}
+implementation:
+  container:
+    image: python:3.7
+    command:
+    - python3
+    - -u
+    - -c
+    - |
+      def _make_parent_dirs_and_return_path(file_path: str):
+          import os
+          os.makedirs(os.path.dirname(file_path), exist_ok=True)
+          return file_path
+
+      def automl_evaluate_model_for_nlp(
+        mlpipeline_metrics_path,
+        gcp_project_id,
+        gcp_region,
+        api_endpoint = None,
+        model_name = None,
+      ):
+
+        import subprocess
+        import sys
+        # we could build a base image that includes these libraries if we don't want to do
+        # the dynamic installation when the step runs.
+        subprocess.run([sys.executable, '-m', 'pip', 'install', 'googleapis-common-protos==1.6.0', '--no-warn-script-location'],
+            env={'PIP_DISABLE_PIP_VERSION_CHECK': '1'}, check=True)
+        subprocess.run([sys.executable, '-m', 'pip', 'install', 'google-cloud-automl==0.9.0', '--quiet', '--no-warn-script-location'],
+            env={'PIP_DISABLE_PIP_VERSION_CHECK': '1'}, check=True)
+
+        import google
+        import logging
+        from google.api_core.client_options import ClientOptions
+        from google.cloud import automl
+        import time
+        import json
+
+        logging.getLogger().setLevel(logging.INFO)  # TODO: make level configurable
+
+        if api_endpoint:
+          client_options = ClientOptions(api_endpoint=api_endpoint)
+          client = automl.AutoMlClient(client_options=client_options)
+        else:
+          client = automl.AutoMlClient()
+
+        # A resource that represents Google Cloud Platform location.
+        project_location = client.location_path(gcp_project_id, gcp_region)
+
+        print("List of model evaluations:")
+        for evaluation in client.list_model_evaluations(model_name, ""):
+          if evaluation.display_name == '':
+              logging.info("Model evaluation name: {}".format(evaluation.name))
+              logging.info(
+                  "Model annotation spec id: {}".format(
+                      evaluation.annotation_spec_id
+                  )
+              )
+              logging.info("Create Time:")
+              logging.info("\tseconds: {}".format(evaluation.create_time.seconds))
+              logging.info("\tnanos: {}".format(evaluation.create_time.nanos / 1e9))
+              logging.info(
+                  "Evaluation example count: {}".format(
+                  evaluation.evaluated_example_count
+                  )
+              )
+              logging.info(
+                  "Model evaluation metrics - auprc: {}".format(
+                      evaluation.classification_evaluation_metrics.au_prc
+                  )
+              )
+              auprc = evaluation.classification_evaluation_metrics.au_prc
+              for eva_num in evaluation.classification_evaluation_metrics.confidence_metrics_entry:
+                  if eva_num.confidence_threshold == 0.5:
+                      logging.info(
+                          "Model evaluation metrics (threshold = 0.5): {}".format(
+                              eva_num
+                          )
+                      )
+                      f1 = eva_num.f1_score
+                      recall = eva_num.recall
+                      precision = eva_num.precision
+                      break
+              break
+
+        print('overall threshold = 0.5, F1: {}, recall: {}, auprc: {}, precision: {}'.format(f1, recall, auprc, precision))
+
+        metrics = {
+          'metrics': [{
+            'name': 'precision-score', # The name of the metric. Visualized as the column name in the runs table.
+            'numberValue':  precision, # The value of the metric. Must be a numeric value.
+            'format': "PERCENTAGE",   # The optional format of the metric. Supported values are "RAW" (displayed in raw format) and "PERCENTAGE" (displayed in percentage format).
+          },
+          {
+            'name': 'recall-score', # The name of the metric. Visualized as the column name in the runs table.
+            'numberValue':  recall, # The value of the metric. Must be a numeric value.
+            'format': "PERCENTAGE",   # The optional format of the metric. Supported values are "RAW" (displayed in raw format) and "PERCENTAGE" (displayed in percentage format).
+          },
+          {
+            'name': 'f1-score', # The name of the metric. Visualized as the column name in the runs table.
+            'numberValue':  f1, # The value of the metric. Must be a numeric value.
+            'format': "PERCENTAGE",   # The optional format of the metric. Supported values are "RAW" (displayed in raw format) and "PERCENTAGE" (displayed in percentage format).
+          },
+          {
+            'name': 'auprc', # The name of the metric. Visualized as the column name in the runs table.
+            'numberValue':  auprc, # The value of the metric. Must be a numeric value.
+            'format': "PERCENTAGE",   # The optional format of the metric. Supported values are "RAW" (displayed in raw format) and "PERCENTAGE" (displayed in percentage format).
+          }
+          ]
+        }
+        with open(mlpipeline_metrics_path, 'w') as mlpipeline_metrics_file:
+          mlpipeline_metrics_file.write(json.dumps(metrics))
+
+        return (auprc, f1, recall, precision)
+
+      def _serialize_float(float_value: float) -> str:
+          if isinstance(float_value, str):
+              return float_value
+          if not isinstance(float_value, (float, int)):
+              raise TypeError('Value "{}" has type "{}" instead of float.'.format(str(float_value), str(type(float_value))))
+          return str(float_value)
+
+      import argparse
+      _parser = argparse.ArgumentParser(prog='Automl evaluate model for nlp', description='')
+      _parser.add_argument("--gcp-project-id", dest="gcp_project_id", type=str, required=True, default=argparse.SUPPRESS)
+      _parser.add_argument("--gcp-region", dest="gcp_region", type=str, required=True, default=argparse.SUPPRESS)
+      _parser.add_argument("--api-endpoint", dest="api_endpoint", type=str, required=False, default=argparse.SUPPRESS)
+      _parser.add_argument("--model-name", dest="model_name", type=str, required=False, default=argparse.SUPPRESS)
+      _parser.add_argument("--mlpipeline-metrics", dest="mlpipeline_metrics_path", type=_make_parent_dirs_and_return_path, required=True, default=argparse.SUPPRESS)
+      _parser.add_argument("----output-paths", dest="_output_paths", type=str, nargs=4)
+      _parsed_args = vars(_parser.parse_args())
+      _output_files = _parsed_args.pop("_output_paths", [])
+
+      _outputs = automl_evaluate_model_for_nlp(**_parsed_args)
+
+      _output_serializers = [
+          _serialize_float,
+          _serialize_float,
+          _serialize_float,
+          _serialize_float,
+
+      ]
+
+      import os
+      for idx, output_file in enumerate(_output_files):
+          try:
+              os.makedirs(os.path.dirname(output_file))
+          except OSError:
+              pass
+          with open(output_file, 'w') as f:
+              f.write(_output_serializers[idx](_outputs[idx]))
+    args:
+    - --gcp-project-id
+    - {inputValue: gcp_project_id}
+    - --gcp-region
+    - {inputValue: gcp_region}
+    - if:
+        cond: {isPresent: api_endpoint}
+        then:
+        - --api-endpoint
+        - {inputValue: api_endpoint}
+    - if:
+        cond: {isPresent: model_name}
+        then:
+        - --model-name
+        - {inputValue: model_name}
+    - --mlpipeline-metrics
+    - {outputPath: mlpipeline_metrics}
+    - '----output-paths'
+    - {outputPath: auprc}
+    - {outputPath: f1}
+    - {outputPath: recall}
+    - {outputPath: precision}
