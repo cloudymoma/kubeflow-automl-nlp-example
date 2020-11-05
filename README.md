@@ -9,7 +9,7 @@ This project uses Function as a Http trigger. There are two functions, including
 
 The whole workflow uses AI Platform pipeline(based on Kubeflow) as orchestrator. The core service is the pipeline is AutoML NLP service, for text classification model customization. After AutoML model is deployed, the model_id will be stored in Firestore.
 
-![Architecture](images/Architecture.png "architecture")
+![Architecture](images/architecture.png "architecture")
 
 ## Deployment Steps
 
