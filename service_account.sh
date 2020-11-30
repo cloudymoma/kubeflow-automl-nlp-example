@@ -5,16 +5,16 @@ source env.sh
 set -euxo pipefail
 
 #create service account and config it
-ADMIN_NAME='******'
+ADMIN_NAME='kf-automl'
 
 gcloud iam service-accounts create $ADMIN_NAME
 gcloud projects add-iam-policy-binding $PROJECT_ID --member "serviceAccount:$ADMIN_NAME@$PROJECT_ID.iam.gserviceaccount.com" --role "roles/owner"
-gcloud iam service-accounts keys create ~/$ADMIN_NAME.json --iam-account $ADMIN_NAME@$PROJECT_ID.iam.gserviceaccount.com
+gcloud iam service-accounts keys create "$PWD/$ADMIN_NAME.json" --iam-account $ADMIN_NAME@$PROJECT_ID.iam.gserviceaccount.com
 
 
-export GOOGLE_APPLICATION_CREDENTIALS=key-file
-gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$ADMIN_NAME@appspot.gserviceaccount.com" --role="roles/storage.admin"
-gcloud projects add-iam-policy-binding $PROJECT_ID --member=serviceAccount:$ADMIN_NAME --role='roles/automl.editor'
+export GOOGLE_APPLICATION_CREDENTIALS="$PWD/$ADMIN_NAME.json"
+gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$PROJECT_ID@appspot.gserviceaccount.com" --role=roles/storage.admin
+gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$ADMIN_NAME@$PROJECT_ID.iam.gserviceaccount.com" --role=roles/automl.editor
 gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$ADMIN_NAME@$PROJECT_ID.iam.gserviceaccount.com" --role=roles/logging.logWriter
 gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$ADMIN_NAME@$PROJECT_ID.iam.gserviceaccount.com" --role=roles/monitoring.metricWriter
 gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$ADMIN_NAME@$PROJECT_ID.iam.gserviceaccount.com" --role=roles/monitoring.viewer
